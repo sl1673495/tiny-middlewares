@@ -4,7 +4,14 @@ type Action<T = any> = {
   type: T
 }
 
-function createStore<S, A extends Action>(reducer: Reducer<S, A>) {
+function compose(...funcs: Function[]) {
+  return funcs.reduce((a, b) => (...args: any) => a(b(...args)))
+}
+
+function createStore<S, A extends Action>(
+  reducer: Reducer<S, A>,
+  middlewares?: any[],
+) {
   let currentState: S
 
   function dispatch(action: A) {
@@ -17,8 +24,13 @@ function createStore<S, A extends Action>(reducer: Reducer<S, A>) {
 
   dispatch({type: 'INIT'} as A)
 
+  let enhancedDispatch = dispatch
+  if (middlewares) {
+    enhancedDispatch = compose(...middlewares)(dispatch, getState)
+  }
+
   return {
-    dispatch,
+    dispatch: enhancedDispatch,
     getState,
   }
 }
@@ -58,12 +70,28 @@ function counterReducer(
     }
 
     default: {
-        return state
+      return state
     }
   }
 }
 
-const counterStore = createStore(counterReducer)
+const typeLogMiddleware = (dispatch) => {
+    return ({type, ...args}) => {
+        console.log(`type is ${type}`)
+        return dispatch({type, ...args})
+    }
+}
+
+const stateLogMiddleware = (dispatch, getState) => {
+    return ({type, ...args}) => {
+        console.log(`state before is ${JSON.stringify(getState())}`)
+        const result = dispatch({type, ...args})
+        console.log(`state after is ${JSON.stringify(getState())}`)
+        return result
+    }
+}
+
+const counterStore = createStore(counterReducer, [typeLogMiddleware, stateLogMiddleware])
 
 console.log(counterStore.getState().count)
 counterStore.dispatch({type: 'add', payload: 2})
