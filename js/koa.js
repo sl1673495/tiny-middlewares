@@ -25,6 +25,15 @@ class Koa {
     }
 }
 const app = new Koa();
+// 最外层 管控全局错误
+app.use(async (ctx, next) => {
+    try {
+        await next();
+    }
+    catch (error) {
+        console.log(`[koa error]: ${error.message}`);
+    }
+});
 // log middleware
 app.use(async (ctx, next) => {
     const { req } = ctx;
@@ -33,7 +42,7 @@ app.use(async (ctx, next) => {
     console.log(`res is ${JSON.stringify(ctx.res)}`);
 });
 // service middleware
-app.use(async (ctx) => {
+app.use(async (ctx, next) => {
     const { req } = ctx;
     console.log(`calculating the res of ${req}...`);
     const res = {
@@ -42,5 +51,10 @@ app.use(async (ctx) => {
     };
     // 写入ctx
     ctx.res = res;
+    await next();
+});
+// test error
+app.use(async (ctx, next) => {
+    throw new Error('oops! error!');
 });
 app.start({ req: 'ssh' });
