@@ -12,7 +12,7 @@ function createStore(reducer, middlewares) {
     dispatch({ type: 'INIT' });
     let enhancedDispatch = dispatch;
     if (middlewares) {
-        enhancedDispatch = compose(...middlewares)(dispatch, getState);
+        enhancedDispatch = compose(...middlewares)(dispatch);
     }
     return {
         dispatch: enhancedDispatch,
@@ -42,21 +42,19 @@ function counterReducer(state = counterInitial, action) {
         }
     }
 }
-const typeLogMiddleware = (dispatch) => {
+const typeLogMiddleware = dispatch => {
     return ({ type, ...args }) => {
         console.log(`type is ${type}`);
         return dispatch({ type, ...args });
     };
 };
-const stateLogMiddleware = (dispatch, getState) => {
-    return ({ type, ...args }) => {
-        console.log(`state before is ${JSON.stringify(getState())}`);
-        const result = dispatch({ type, ...args });
-        console.log(`state after is ${JSON.stringify(getState())}`);
-        return result;
+const otherDummyMiddleware = dispatch => {
+    return action => {
+        console.log(`type in dummy is ${action.type}`);
+        return dispatch(action);
     };
 };
-const counterStore = createStore(counterReducer, [typeLogMiddleware, stateLogMiddleware]);
+const counterStore = createStore(counterReducer, [typeLogMiddleware, otherDummyMiddleware]);
 console.log(counterStore.getState().count);
 counterStore.dispatch({ type: 'add', payload: 2 });
 console.log(counterStore.getState().count);
