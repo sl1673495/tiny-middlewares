@@ -1,7 +1,7 @@
 ## 前言
 前端中的库很多，开发这些库的作者会尽可能的覆盖到大家在业务中千奇百怪的需求，但是总有无法预料到的，所以优秀的库就需要提供一种机制，让开发者可以干预插件中间的一些环节，从而完成自己的一些需求。  
 
-本文将从`axios`、`vuex`和`redux`的实现来教你怎么编写属于自己的插件机制。  
+本文将从`koa`、`axios`、`vuex`和`redux`的实现来教你怎么编写属于自己的插件机制。  
 
 * 对于新手来说：  
 本文能让你搞明白神秘的插件和拦截器到底是什么东西。
@@ -196,7 +196,8 @@ axios.useResponseInterceptor(
 );
 ```
 
-### 成功的调用
+1. 成功的调用  
+
 在成功的调用下输出 `result1:  extraParams1 extraParams2 message1`  
 ```js
 (async function() {
@@ -207,7 +208,7 @@ axios.useResponseInterceptor(
 })();
 ```
 
-### 失败的调用
+2. 失败的调用  
 ```js
 (async function() {
   const result = await axios.run({
@@ -434,6 +435,147 @@ console.log(counterStore.getState().count)
 // 2
 ```
 
+## koa
+koa的洋葱模型想必各位都听说过，这种灵活的中间件机制也让koa变得非常强大，本文也会实现一个简单的洋葱中间件机制。参考（[umi-request的中间件机制](https://juejin.im/post/5db7af846fb9a0202b5ee13c#heading-6)）  
+
+![洋葱圈](https://user-gold-cdn.xitu.io/2020/1/8/16f8325868c493bd?w=478&h=435&f=png&s=93760)  
+
+对应这张图来看，洋葱的每一个圈就是一个中间件，它即可以掌管请求进入，也可以掌管响应返回。  
+
+它和redux的中间件机制有点类似，本质上都是高阶函数的嵌套，外层的中间件嵌套着内层的中间件，这种机制的好处是可以自己控制中间件的能力（外层的中间件可以影响内层的请求和响应阶段，内层的中间件只能影响外层的响应阶段）  
+
+首先我们写出`Koa`这个类
+```js
+class Koa {
+    constructor() {
+        this.middlewares = [];
+    }
+    use(middleware) {
+        this.middlewares.push(middleware);
+    }
+    start({ req }) {
+        const composed = composeMiddlewares(this.middlewares);
+        const ctx = { req, res: undefined };
+        return composed(ctx);
+    }
+}
+``` 
+
+这里的use就是简单的把中间件推入中间件队列中，那核心就是怎样去把这些中间件组合起来了，下面看`composeMiddlewares`方法：  
+
+```js
+function composeMiddlewares(middlewares) {
+    return function wrapMiddlewares(ctx) {
+        // 记录当前运行的middleware的下标
+        let index = -1;
+        function dispatch(i) {
+            // index向后移动
+            index = i;
+            
+            // 找出数组中存放的相应的中间件
+            const fn = middlewares[i];
+            
+            // 最后一个中间件调用next 也不会报错
+            if (!fn) {
+                return Promise.resolve();
+            }
+                
+            return Promise.resolve(
+                fn(
+                    // 继续传递ctx
+                    ctx, 
+                    // next方法，允许进入下一个中间件。
+                    () => dispatch(i + 1)
+                )
+            );
+        }
+        // 开始运行第一个中间件
+        return dispatch(0);
+    };
+}
+```
+
+简单来说 dispatch(n)对应着第n个中间件的执行，而dispatch(n)又拥有执行dispatch(n + 1)的权力，
+
+所以在真正运行的时候，中间件并不是在平级的运行，而是嵌套的高阶函数：  
+
+dispatch(0)包含着dispatch(1)，而dispatch(1)又包含着dispatch(2)  在这个模式下，我们很容易联想到`try catch`的机制，它可以catch住函数以及函数内部继续调用的函数的所有`error`。  
+
+那么我们的第一个中间件就可以做一个错误处理中间件：  
+
+```js
+// 最外层 管控全局错误
+app.use(async (ctx, next) => {
+    try {
+        // 这里的next包含了第二层以及第三层的运行
+        await next();
+    }
+    catch (error) {
+        console.log(`[koa error]: ${error.message}`);
+    }
+});  
+```
+
+在这个错误处理中间件中，我们把next包裹在try catch中运行，调用了next后会进入第二层的中间件：  
+
+```js
+// 第二层 日志中间件
+app.use(async (ctx, next) => {
+    const { req } = ctx;
+    console.log(`req is ${JSON.stringify(req)}`);
+    await next();
+    // next过后已经能拿到第三层写进ctx的数据了
+    console.log(`res is ${JSON.stringify(ctx.res)}`);
+});
+```
+
+在第二层中间件的next调用后，进入第三层，业务逻辑处理中间件
+```js
+// 第三层 核心服务中间件
+// 在真实场景中 这一层一般用来构造真正需要返回的数据 写入ctx中
+app.use(async (ctx, next) => {
+    const { req } = ctx;
+    console.log(`calculating the res of ${req}...`);
+    const res = {
+        code: 200,
+        result: `req ${req} success`,
+    };
+    // 写入ctx
+    ctx.res = res;
+    await next();
+});
+```  
+
+在这一层把res写入ctx后，函数出栈，又会回到第二层中间件的`await next()`后面
+```js
+ console.log(`req is ${JSON.stringify(req)}`);
+ await next();
+ // <- 回到这里
+ console.log(`res is ${JSON.stringify(ctx.res)}`);
+```  
+
+这时候日志中间件就可以拿到`ctx.res`的值了。  
+
+想要测试错误处理中间件 就在最后加入这个中间件
+```js
+// 用来测试全局错误中间件
+// 注释掉这一个中间件 服务才能正常响应
+app.use(async (ctx, next) => {
+    throw new Error('oops! error!');
+});
+```
+
+最后要调用启动函数：
+```js
+app.start({ req: 'ssh' });
+```
+
+控制台打印出结果：
+```js
+req is "ssh"
+calculating the res of ssh...
+res is {"code":200,"result":"req ssh success"}
+```
 
 ## 总结
 1. `axios` 把用户注册的每个拦截器构造成一个promise.then所接受的参数，在运行时把所有的拦截器按照一个promise链的形式以此执行。
@@ -442,8 +584,11 @@ console.log(counterStore.getState().count)
 
 2. vuex的实现最为简单，就是提供了两个回调函数，vuex内部在合适的时机去调用（我个人感觉大部分的库提供这样的机制也足够了）。
 3. redux的源码里写的最复杂最绕，它的中间件机制本质上就是用高阶函数不断的把dispatch包装再包装，形成套娃。本文实现的已经是精简了n倍以后的结果了，不过复杂的实现也是为了很多权衡和考量，Dan对于闭包和高阶函数的运用已经炉火纯青了，只是外人去看源码有点头秃...    
+4. koa的洋葱模型实现的很精妙，和redux有相似之处，但是在源码理解和使用上个人感觉更优于redux的中间件。  
 
-希望看了这篇文章的你，能对于前端库中的插件机制有进一步的了解，进而更优秀的使用或者写出更好的开源框架。
+中间件机制其实是非框架强相关的，请求库一样可以加入koa的洋葱中间件机制（如umi-request），不同的框架可能适合不同的中间件机制，这还是取决于你编写的框架想要解决什么问题，想给用户什么样的自由度。  
+
+希望看了这篇文章的你，能对于前端库中的中间件机制有进一步的了解，进而为你自己的前端库加入合适的中间件能力。
 
 本文所写的代码都整理在这个仓库里了：  
 https://github.com/sl1673495/tiny-middlewares  
