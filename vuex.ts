@@ -30,11 +30,6 @@ export type PickPayload<Types, Type> = Types extends {
 }
   ? P
   : never;
-
-type A = string | number;
-type PickString<T> = T extends string ? T : never;
-
-type T1 = PickString<A>; // string
 export default class Vuex<S, A, G> {
   state: S;
   action: Actions<S, A>;
