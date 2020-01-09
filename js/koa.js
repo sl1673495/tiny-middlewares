@@ -68,7 +68,7 @@ app.use(async (ctx, next) => {
 });
 // 用来测试全局错误中间件
 // 注释掉这一个中间件 服务才能正常响应
-// app.use(async (ctx, next) => {
-//     throw new Error('oops! error!');
-// });
+app.use(async (ctx, next) => {
+    throw new Error('oops! error!');
+});
 app.start({ req: 'ssh' });
